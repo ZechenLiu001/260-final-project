@@ -27,5 +27,5 @@ Pictures:
 `Shinyscreenshort1.png` to `Shinyscreenshort4.png` is the picture used in Rmd file and final report.
 
 
-Our website can be found [here](https://sites.google.com/d/1n0JKzxIAQqdC7t1KgIwNBHTOVBJ_RwVG/p/1T59esXCAnZ3CzuZr3RwCC-FEFQuj-AyI/edit) 
+Our website can be found [here](https://sites.google.com/view/bst-260-group9-final) 
 Our screencase can be found [here](https://youtu.be/HE6pGQev5vQ)
