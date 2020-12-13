@@ -20,7 +20,7 @@ In our project, we use four different methods, namely RNN, Instantaneous reprodu
 
 ## Related Work
 
-Our Shiny app is mainly inspried by the COVID-19 Dashborard by by the Center for Systems Science and Engineering (CSSE) at Johns Hopkins University (JHU) (https://coronavirus.jhu.edu/map.html). Therefore, we want to make an heatmap to show the general trend of COVID-19 in each county. We also incorprate the visualization of other three data analysis tools to visualize selected counties. 
+Our Shiny app is mainly inspired by the COVID-19 Dashborard by by the Center for Systems Science and Engineering (CSSE) at Johns Hopkins University (JHU) (https://coronavirus.jhu.edu/map.html). Therefore, we want to make a heatmap to show the general trend of COVID-19 in each county. We also incorprate the visualization of other three data analysis tools to visualize selected counties. 
 
 
 ## Initial Questions
@@ -38,8 +38,6 @@ For all analysis, data of daily COVID-19 cases and deaths of each county was ele
 For GLM, the dataset we use comes from the link (https://github.com/Yu-Group/covid19-severity-prediction/tree/master/data). It is an abridged county-level dataset which combines data from several sources. It includes potential risk factors such as social distancing (with multiple indicators like mobility trends from Google and Apple and estimates of total vehicle miles travelled by residents of each county, each day), pre-exsited health conditions (cardiovascular diseases, diseases of respiratory system, etc), socioeconomic status, etc. Interestingly, the first one also includes presidential election result of each county in the Unites States between 2000 and 2016. 
 \
 For Shiny, the data to make the map for US counties is from “usmap” package. The geographic location (Latitude and Longitude) of each US county for computing and generating its spatially nearestneighbors was obtained from COVID-19 Data Repository by the Center for Systems Science and Engineering (CSSE) at Johns Hopkins University (https://github.com/CSSEGISandData/COVID-19). “sp”and “rgeos” package was used to calculate the package of spatial distances of each county.
-
-
 
 
 ## Exploratory Analysis
@@ -369,7 +367,7 @@ us_counties %>%
 ### Instantaneous reproduction number (Rt)
 
 \
-We estimate the instantaneous reproduction number (Rt) by using the serial interval distribution given by a study based on 86 Chinese cities. We used the gamma distribution to estimate the distribution of serial interval, where mu=5.24 and sd=2.36 given by this paper (Du, Z. et.al., 2020). 
+We estimate the instantaneous reproduction number (Rt) by using the serial interval distribution given by a study based on 86 Chinese cities. We used the gamma distribution to estimate the distribution of serial interval, where $mu$=5.24 and sd=2.36 given by this paper (Du, Z. et.al., 2020). 
 \
 ```{r}
 mu <- 5.49
@@ -382,7 +380,7 @@ si <- distcrete("gamma", shape = params$shape,
 si<-c(0,si$d(1:20))
 ```
 \
-In the paper we mentioned above, the author indicate that the estimation is expected to be less variable as the window size increases, because 2 successive time windows will then have increasing overlap. Therefore, we specify the start time as 14 days-28 days, which considered as one to two max serial intervals where we believe the data is more convincing than what it was in the first few days. And the end time is 14 days before the last date to the last day.
+In the paper we mentioned above, the author indicated that the estimation is expected to be less variable as the window size increases, because 2 successive time windows will then have increasing overlap. Therefore, we specify the start time as 14 days-28 days, which considered as one to two max serial intervals where we believe the data is more convincing than what it was in the first few days. And the end time is 14 days before the last date to the last day. In this way, we are trying to maximized the time window.
 \
 ```{r}
 NYC<-counties%>%
@@ -401,12 +399,20 @@ ggplot(NYC_plot)+
   scale_x_date(date_breaks = "2 month")+
   labs(y="Rt",x="Date",title = "Estimated Rt of New York City")+
   geom_hline(yintercept = 1,col="black", linetype="dashed")+
+  geom_vline(xintercept =ymd("2020-03-07"),linetype="dashed",col="skyblue2",size=1.5)+
+  geom_vline(xintercept =ymd("2020-11-03"),linetype="dashed",col="skyblue2",size=1.5)+
+  geom_vline(xintercept =ymd("2020-04-17"),linetype="dashed",col="skyblue2",size=1.5)+
+  geom_vline(xintercept =ymd("2020-06-08"),linetype="dashed",col="skyblue2",size=1.5)+
+  geom_text(x=ymd("2020-03-30"),y=1.8,label="State-Wide Emergency",size=3.5)+
+  geom_text(x=ymd("2020-10-05"),y=1.8,label="Presidential Election",size=3.5)+
+  geom_text(x=ymd("2020-06-05"),y=1.2,label="extend lockdown and anti-lockdown protest",size=3.5)+
+  geom_text(x=ymd("2020-06-30"),y=0.8,label="four phase reopening",size=3.5)+
   theme_minimal()
 ```
 \
-Now we have a plot of Rt. The concept of Rt is different from R0. R0 refers to expected number of cases directly generated by one case in a population where all individuals are susceptible to infection. While Rt refers to number of people one cases can infect on average at a given time in current state of population. 
+Now we have a plot of instantaneous reproduction number (Rt). The concept of Rt is different from R0. R0 refers to expected number of cases directly generated by one case in a population where all individuals are susceptible to infection. While Rt refers to number of people one cases can infect on average at a given time in current state of population. 
 \
-Therefore, when the when Rt>1, it means the Covid-19 will infect more people and daily. For example, in New York City, we can find that the Rt is very high in march and in early November and the trend is slowly increasing between late April and November. It may reflect lockdown, four-phase reopening plan start in April, and the presidential election.
+Therefore, when Rt>1, the Covid-19 will spread faster while if the Rt<1 Covid-19 will spread slower. For example, in New York City, we can find that the Rt is very high in march and in early November and the trend is slowly increasing between late April and November. It may reflect lockdown, four-phase reopening plan start in April, and the presidential election in Nov,4.
 \
 ```{r}
 NYC_pred<-NYC%>%
@@ -426,7 +432,7 @@ plot(i[(nrow(NYC)-22):(nrow(NYC)-1)], alpha = 0.5) %>%
   labs(title="Predicted Daily incidence versus real data")
 ```
 \
-In this plot, we estimate the daily incidence for 21 days from Nov.10. In this plot, the new cases fits well with the observed data and daily new cases in predicted to be dropped after Dec.04.
+In this plot, we estimate the daily incidence for 21 days from Nov,10. In this plot, the new cases fits well with the observed data and daily new cases in predicted to be dropped after Dec,04.
 
 ### GLM: Generalizability - Other Counties
 ```{r, echo=FALSE, warning=FALSE, message = FALSE}
