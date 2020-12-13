@@ -1,3 +1,17 @@
+#BST260 final project - 2020FALL
+#Date:12/13/2020
+#Group 9
+# COVID-19: US County-Level Analyses & Predictions
+# Zhaoxun Hou
+# Zechen Liu
+# Jiayue Guan
+# Haoyuan Li
+
+### Note: in my environment, it takes about 3-4 minutes to run this rhiny app, 
+### feel free to grab a cup of coffee :)
+
+#setwd("D:/OneDrive - Harvard University/Desktop/files/material/BST260/BST260final project")
+
 #packages used in Tab1: 
 library(tidyverse)
 library(lubridate)
@@ -30,13 +44,11 @@ conflict_prefer("select", "dplyr")
 conflict_prefer("filter", "dplyr")
 conflict_prefer("lag", "dplyr")
 
-
-
 ######################
 # Covid-19-dashboard #
 ######################
 us_counties <- read_csv("us-counties.csv")
-
+us_counties[us_counties$fips=="35013",]$county=="dona ana" #Do??a Ana
 
 allcounty <- map_data("county") %>%
     mutate(subregion=str_remove_all(subregion,pattern="\\s"))
@@ -61,6 +73,9 @@ us_counties<-us_counties %>%
 #computing 6 spatial nearest neighbour#
 #######################################
 time_series_covid19_confirmed_US <- read_csv("time_series_covid19_confirmed_US.csv")
+time_series_covid19_confirmed_US[which(time_series_covid19_confirmed_US$FIPS=="36061"),]$Admin2 <-"New York City"
+
+    
 spatialdata <- time_series_covid19_confirmed_US %>%
     mutate(region=tolower(Province_State),
            subregion=tolower(Admin2),
@@ -109,6 +124,7 @@ spatialneighbordata<-us_counties %>%
     select(placeforselect,county,state,region,subregion) %>%
     distinct(placeforselect,county,state,region,subregion) %>%
     left_join(spatialneighbordata,by=c("region","subregion"))
+
 #################################################
 
 
@@ -120,8 +136,12 @@ spatialneighbordata<-us_counties %>%
 #datasets used
 apple <- read.csv("apple.csv")
 
+apple[which(apple$countyFIPS=="36061"),]$Region<-"new york city" # "new york city and new york county"
+
 infection <- read.csv("us-counties.csv") %>% 
     mutate(placeforselect=paste(county,state, sep=", ")) 
+
+
 ########################
 
 ###########################
@@ -150,22 +170,23 @@ si<-c(0,si$d(1:20))
 
 
 #############
-# KNN model #
+# rnn model #
 #############
 
 #read model results
-#KNN model used pre-runned results, which have been writen into "KNN_result.csv"
-knn<-read_csv("KNN_result.csv")
-colnames(knn) <- c("fips","2020-11-19","2020-11-20",
-                   "2020-11-21","2020-11-22","2020-11-23","2020-11-24",
-                   "2020-11-25","2020-11-26","2020-11-27","2020-11-28",
-                   "2020-11-29","2020-11-30","2020-12-01","2020-12-02")
-knn <- knn %>% 
+#rnn model used pre-runned results, which have been writen into "RNN_result.csv"
+rnn<-read_csv("rnn_results.csv")
+# colnames(rnn) <- c("fips","2020-11-19","2020-11-20",
+#                    "2020-11-21","2020-11-22","2020-11-23","2020-11-24",
+#                    "2020-11-25","2020-11-26","2020-11-27","2020-11-28",
+#                    "2020-11-29","2020-11-30","2020-12-01","2020-12-02")
+rnn <- rnn %>% 
+    select(-name) %>% 
     gather("date","pred_newcases",-fips)
-knn_fips<-knn %>% select(fips) %>% distinct()
-knn <- infection %>%
-    left_join(knn,c("fips","date")) %>% 
-    right_join(knn_fips,"fips") %>% 
+rnn_fips<-rnn %>% select(fips) %>% distinct()
+rnn <- infection %>%
+    left_join(rnn,c("fips","date")) %>% 
+    right_join(rnn_fips,"fips") %>% 
     mutate(placeforselect = paste(county,state, sep=", ")) %>%
     select(-c(county,state,fips,deaths)) %>% 
     group_by(placeforselect) %>% 
@@ -174,7 +195,7 @@ knn <- infection %>%
            newcases=cases-lag(cases),
            newcases=ifelse(newcases<0,0,newcases),
            newcases7dayavg=rollmean(newcases, k = 7, fill = NA))
-rm(knn_fips)
+rm(rnn_fips)
 ########
 ###ui###
 ########
@@ -277,12 +298,14 @@ ui <- fluidPage(theme = shinytheme("yeti"),
                     # Fourth tab
                     tabPanel(
                         # Application title
-                        titlePanel("KNN"),
+                        titlePanel("RNN"),
                         sidebarLayout(
                             sidebarPanel(
                                 selectizeInput("tab4_county",label = "Select 1 county",
-                                               choices=c(distinct(knn,placeforselect)),
-                                               selected=c("Middlesex, Massachusetts"))
+                                               choices=c(distinct(rnn,placeforselect)),
+                                               selected=c("Middlesex, Massachusetts")),
+                                p("Single-layer LSTM network was used to predict the new cases in next day give the new cases in previous days. The model is trained by minimizing the mean square error of predicted new cases and actual new cases. After that, trained LSTM was used to predict the new cases from November 16th to November 29th given the cases in previous days."),
+                                p("Noted that only counties in testing sets are included here, you may not find your interested counties.")
                             ),#End of sidebarPanel
 
 
@@ -321,19 +344,6 @@ server <- function(input, output) {
 
     #"tab1_table" shows cumulative/new cases/deathes of selected counties on selected date
     output$tab1_table<-renderTable({
-        # us_counties %>%
-        #     filter(date==input$tab1_date) %>%
-        #     select(county,state,
-        #            cases,newcases,newcases7dayavg,
-        #            deaths,newdeaths,newdeaths7dayavg) %>%
-        #     rename("County"="county",
-        #            "State"="state",
-        #            "Cases"="cases",
-        #            "New cases"="newcases",
-        #            "New cases (7 day average)"="newcases7dayavg",
-        #            "Deaths"="deaths",
-        #            "New deaths"="newdeaths",
-        #            "New deaths (7 day average)"="newdeaths7dayavg")
         spatialneighbordata %>%
             #filter the selected county
             filter(placeforselect==input$tab1_county) %>%
@@ -350,10 +360,10 @@ server <- function(input, output) {
             rename("County"="place",
                    "Cases"="cases",
                    "New cases"="newcases",
-                   "Average new cases"="newcases7dayavg",
+                   "Avg new cases"="newcases7dayavg",
                    "Deaths"="deaths",
                    "New deaths"="newdeaths",
-                   "Average New deaths"="newdeaths7dayavg")
+                   "Avg New deaths"="newdeaths7dayavg")
     })#END of render table
 
 
@@ -425,9 +435,11 @@ server <- function(input, output) {
                   panel.background = element_blank(),
                   axis.title = element_blank(),
                   axis.text = element_blank(),
-                  axis.ticks = element_blank())
+                  axis.ticks = element_blank())+
+            coord_fixed(1.3)
     })
 
+    
     output$tab1_map<-renderPlot({
 
         if(input$tab1_var == "cases") {
@@ -435,8 +447,7 @@ server <- function(input, output) {
                 scale_fill_gradientn(name="Cases",
                                      colors = brewer.pal(9,"Reds"),
                                      trans="log10",
-                                     na.value="white",
-                                     #limits = c(1,50000)
+                                     na.value="white"
                                      )
         }
 
@@ -649,10 +660,10 @@ server <- function(input, output) {
     
 
 #########################
-#Function for TBA4: KNN #
+#Function for TBA4: rnn #
 #########################
     output$tab4_plot1=renderPlot({
-        knn %>%
+        rnn %>%
             #filter the selected county
             filter(placeforselect==input$tab4_county) %>%
             ggplot()+
@@ -663,11 +674,11 @@ server <- function(input, output) {
             theme_bw()+
             labs(x="",
                 y="7-day-average New Cases",
-                title="7-day-average New Cases vs KNN model prediction about last 14 days")
+                title="7-day-average New Cases vs RNN model prediction about last 14 days")
     })
     
     output$tab4_plot2=renderPlot({
-        knn %>%
+        rnn %>%
             #filter the selected county
             filter(placeforselect==input$tab4_county,
                    date>"2020-11-01") %>%
