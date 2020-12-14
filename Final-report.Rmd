@@ -7,6 +7,8 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+library(reticulate)
+use_python('C:/Users/lhy/AppData/Local/Continuum/anaconda3/envs/tensorflow2',required=TRUE)
 ```
 
 ## Overview and Motivation
@@ -16,12 +18,12 @@ It is important to analyze the underlying reason of fast spreading of covid-19 a
 \
 In our project, we use four different methods, namely RNN, Instantaneous reproduction number (Rt), and GLM to predict daily new cases and deaths in each county of America, and a shiny app spatial data to detect potential hotspots of counties and aid finding the counties impacted heavily by COVID-19, and serveas an efficient  tool to visualize the data anaylsises. 
 
-\
 
 ## Related Work
 
 Our Shiny app is mainly inspired by the COVID-19 Dashborard by by the Center for Systems Science and Engineering (CSSE) at Johns Hopkins University (JHU) (https://coronavirus.jhu.edu/map.html). Therefore, we want to make a heatmap to show the general trend of COVID-19 in each county. We also incorprate the visualization of other three data analysis tools to visualize selected counties. 
-
+\
+In order to capture long-term dependency. LSTM(https://dl.acm.org/doi/10.1162/neco.1997.9.8.1735) is an improvement over the original RNN by introducing forgetting gate, input gate and output gate. It is widely used to process sequence data, such as language and finance data. Several works have already used LSTM to predict new cases. Modified SEIR and AI prediction of the epidemics trend of COVID-19 in China under public health interventions(http://jtd.amegroups.com/article/view/36385) uses LSTM to predict number of new cases in China. Time series forecasting of Covid-19 using deep learning models: India-USA comparative case study(https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7440083/) uses several LSTM model to fit the new cases in USA and India. 
 
 ## Initial Questions
 
@@ -225,6 +227,232 @@ Finally, we decide to present both new cases and seven-day roll mean of new case
 
 
 ### RNN
+#### Data preprocessing
+Filtering out cases not belonging to any counties
+```{r}
+raw_data=read_csv('us-counties.csv')
+raw_data=raw_data[c(1,4,5)]
+raw_data=filter(raw_data,!is.na(fips))
+```
+
+Converting to long table and replace NA with 0
+```{r}
+county=spread(raw_data,date,cases,fill=0)
+```
+
+Generating 7 day average rolling mean of new cases for each county, since there is obvious 7-day period in new cases
+```{r}
+for(i in seq(1,nrow(county))){
+  a=as.vector(unlist(county[i,2:ncol(county)]))
+  a=a-lag(a)
+  a=rollmean(a,k=7,fill=NA)
+  county[i,2:ncol(county)]=as.list(a)
+}
+```
+
+selecting date after 3/10/2020 since most cases happened after that day. Also selecting date befor 11/29/2020 because of NA 
+```{r}
+county1=county[c(1,54:ncol(county)-3)]
+head(county1)
+```
+
+Writing to processed.csv
+```{r}
+write.table(county1,"processed.csv",row.names=FALSE,col.names=TRUE,sep=",")
+```
+
+#### Model Implementation
+At first, I tried to train RNN to fit the total amount of cases. I found the performance is not very ideal. After that, I tried to use train RNN to fit the daily new cases, which performs better than fitting the amount of cases. To improve the stability of data and fitting performance, then I turned to 7-day average rolling mean of new cases. Finally, I found that although LSTM is good at fitting long sequences, too long input sequences could still harm the performance. As a result, I cut the length of input sequence to 45. 
+
+For this part, I use tensorflow2.0 in python to run RNN mainly because that keras in R is quite difficult to use.
+import necessary package
+```{python}
+import tensorflow as tf
+from tensorflow import keras
+from tensorflow.python.keras import backend as K
+from tensorflow.keras.models import Model, Sequential
+from tensorflow.keras import layers
+from tensorflow.keras import activations
+from tensorflow.keras import optimizers
+from tensorflow.keras import losses
+from tensorflow.keras import metrics
+from tensorflow.keras import initializers
+from tensorflow.keras import regularizers
+import csv
+import numpy as np
+import time
+import pandas as pd
+```
+load data
+```{python}
+raw=[]
+with open('processed.csv','r') as f:
+    file=csv.reader(f)
+    for i in file:
+        raw.append(i)
+raw=raw[1:]
+raw=np.array(raw)
+fips=raw[:,0]
+case=raw[:,1:]
+case=case.astype(np.float32)
+fips=fips.astype(np.int)
+print(fips)
+print(case)
+del(raw)
+```
+divide train/validation/test set(0.8/0.1/0.1)
+```{python}
+np.random.seed(0)
+index=np.random.rand(int(fips.size))
+train_index=np.argwhere(index<0.8)[:,0]
+val_index=np.intersect1d(np.argwhere(index>=0.8)[:,0],np.argwhere(index<0.9)[:,0])
+test_index=np.argwhere(index>=0.9)[:,0]
+assert train_index.size+val_index.size+test_index.size==index.size
+```
+```{python}
+case_train=case[train_index]
+fips_train=fips[train_index]
+case_val=case[val_index]
+fips_val=fips[val_index]
+case_test=case[test_index]
+fips_test=fips[test_index]
+```
+
+Generating input and label. Define the new cases as $x=\{x_1,x_2,x_3,...,x_n$. We would like to predict $p(x_i|x_{1:i-1})$. Thus, the input would be $x_{1:n-1}$ and the output would be $x_{2:n}$
+```{python}
+case_train_x=np.expand_dims(case_train[:,-46:-1],axis=2)
+case_train_y=np.expand_dims(case_train[:,-45:],axis=2)
+case_val_x=np.expand_dims(case_val[:,-46:-1],axis=2)
+case_val_y=np.expand_dims(case_val[:,-45:],axis=2)
+case_test_x=np.expand_dims(case_test[:,-46:-1],axis=2)
+case_test_y=np.expand_dims(case_test[:,-45:],axis=2)
+```
+
+Generating dataset for training
+```{python}
+batch_size=32
+shuffle_buffer_size=1000
+train_set=tf.data.Dataset.from_tensor_slices((case_train_x,case_train_y))
+train_set = train_set.shuffle(buffer_size=shuffle_buffer_size)
+train_set = train_set.batch(batch_size)
+val_set=tf.data.Dataset.from_tensor_slices((case_val_x,case_val_y))
+val_set = val_set.batch(batch_size)
+test_set=tf.data.Dataset.from_tensor_slices({'fip':fips_test,'case':case_test_x})
+test_set = test_set.batch(1)
+print(train_set)
+print(test_set)
+```
+Define the model. I use LSTM because it is good at modeling long-term dependency. 
+```{python}
+class Rnn(Model):
+    def __init__(self):
+        super(Rnn, self).__init__()
+        self.rnn_layer=layers.LSTM(2,return_sequences=True,return_state=True)
+        self.dense=layers.Dense(1)
+    def call(self,inputs):
+        x=self.rnn_layer(inputs)
+        return self.dense(x[0])
+    def predict_f(self,inputs,step):
+        predicts=[]
+        x=self.rnn_layer(inputs)
+        state=x[1:]
+        x=self.dense(x[0])[:,-1]
+        predicts.append(np.array(x))
+        for i in range(step-1):
+            x=self.rnn_layer(tf.expand_dims(x,axis=1),initial_state=state)
+            state=x[1:]
+            x=self.dense(x[0])[:,-1]
+            predicts.append(np.array(x))
+        return predicts
+```
+
+Train the model. Please notice that the training epoch is 100 actually. 1 is just for showing
+```{python}
+K.clear_session()
+rnn=Rnn()
+rnn.build((None,276,1))
+print(rnn.summary())
+epochs = 1 #just for showing 
+starter_learning_rate = 0.1
+end_learning_rate = 0.01
+decay_steps = 800
+learning_rate_fn = tf.keras.optimizers.schedules.PolynomialDecay(
+    starter_learning_rate,
+    decay_steps,
+    end_learning_rate,
+    power=0.5)
+optimizer = optimizers.Adam(learning_rate=learning_rate_fn)
+loss = tf.keras.losses.MeanSquaredError()
+rnn.compile(loss=loss,optimizer=optimizer,metrics=['mse'])
+early_stopping = tf.keras.callbacks.EarlyStopping(
+    monitor='val_loss', min_delta=0, patience=3, verbose=0, mode='auto'
+)
+callbacks = [early_stopping]
+start_time = time.time()
+training_results = rnn.fit(
+          train_set,
+          validation_data=val_set,
+          epochs=epochs,
+          callbacks=callbacks,
+          verbose=1)
+execution_time = (time.time() - start_time)/60.0
+print("Training execution time (mins)",execution_time)
+```
+
+Load the weights from previously trained checkpoints
+```{python}
+rnn.load_weights('rnn.h5')
+```
+
+predicting the new cases between 11/16/2020 and 11/29/2020 for counties in test set given the new cases in previous days. 
+```{python}
+predict=[]
+fip=[]
+for i in test_set:
+    #real=list(np.array(i['case'][0,-35:,0]))
+    #real1=list(np.array(i['case'][0,-35:-14,0]))
+    a=rnn.predict_f(i['case'][:,:-14],14)
+    predict.append(list(np.array(a)[:,0,0]))
+    fip.append(int(i['fip']))
+    #print(i['fip'])
+```
+
+Write the predicting result to csv
+```{python}
+result=[]
+for i in range(len(fip)):
+    media=[fip[i]]
+    media.extend(predict[i])
+    result.append(media)
+census_df=pd.DataFrame(result)
+census_df.to_csv('result.csv',index=False)
+```
+
+#### Clean result
+
+set correct column name
+```{r}
+result=read_csv('result.csv')
+names(result)[1]='fips'
+#result$fips=as.character(result$fips)
+names(result)[2:15]=as.character(seq.Date(from=as.Date('2020/11/16'),to=as.Date('2020/11/29'),by='day'))
+head(result)
+```
+Add county name and state name
+```{r}
+raw_data=read_csv('us-counties.csv')
+raw_data=raw_data[!duplicated(raw_data$fips),]
+raw_data$fips=as.numeric(raw_data$fips)
+raw_data=raw_data[2:4]
+result=left_join(result,raw_data,by='fips')
+result=mutate(result, name=paste(county,',',state))
+result=result[c(1:15,18)]
+head(result)
+```
+write cleaned result to csv
+```{r}
+write.csv(result,'rnn_results.csv',row.names=FALSE)
+```
 
 ### Shiny app
 For the geographic factors, a shiny app with data exploration of an interactive line plot that allows you to explorethe time trend of daily new cases/deaths of each selected county and its 5 spatially nearest counties. An interactive heatmap showing daily new cases/deathsof all counties in each selected date was also made. 
@@ -488,7 +716,7 @@ sqrt(mean(((testing$sdm-(pred_mean)))^2, na.rm = T))
 ```
 
 
-Here, to test for generalizaility, we choose Adams County from Ohio becase it has considerably less daily cases. We can see that modeling seven-day roll mean better predict sharp increases like in the case of Adams, Ohio in November. Seven-day roll mean also generate considerably smaller MSE.
+Here, to test for generalizability, we choose Adams County from Ohio because it has considerably less daily cases. We can see that modeling seven-day roll mean better predict sharp increases like in the case of Adams, Ohio in November. Seven-day roll mean also generate considerably smaller MSE.We can use Suffolk, Massachusetts and Los Angeles, California to compare with Adams, Ohio.
 
 ```{r, echo=FALSE, warning=FALSE, message = FALSE}
 
@@ -577,6 +805,43 @@ sqrt(mean(((testing$sdm-(pred_mean)))^2, na.rm = T))
 
 
 ### RNN
+
+For this part, I randomly sampled 6 counties from the test and showed the result in the right half. As we could see, it seems that LSTM could capture the trend in some counties but could not in other counties. In the future, we could incorporate socio-economic data into the prediction to get more accurate result.
+
+process data and sample 6 counties
+```{r}
+predict=read_csv('rnn_results.csv')
+predict=predict[1:ncol(predict)-1]
+true=read_csv('processed.csv')
+true=true[c(1,(ncol(true)-13):ncol(true))]
+true$fips=as.numeric(true$fips)
+select_fips=sample(predict$fips,6)
+true=filter(true,fips %in% select_fips)
+predict=filter(predict,fips %in% select_fips)
+```
+
+```{r}
+long_true=gather(true,date,case,names(true)[2:length(names(true))])
+long_true$date=ymd(long_true$date)
+long_true$attr='true'
+long_predict=gather(predict,date,case,names(predict)[2:length(names(predict))])
+long_predict$date=ymd(long_predict$date)
+long_predict$attr='pred'
+long=rbind(long_true,long_predict)
+```
+
+
+```{r}
+library(Rmisc)
+p1=ggplot(data=filter(long,fips==select_fips[1]))+geom_line(aes(x=date,y=case,group=attr,color=attr))+ggtitle(select_fips[1])+theme(axis.title.x=element_text(size=14),axis.title.y=element_text(size=14))
+p2=ggplot(data=filter(long,fips==select_fips[2]))+geom_line(aes(x=date,y=case,group=attr,color=attr))+ggtitle(select_fips[2])+theme(axis.title.x=element_text(size=14),axis.title.y=element_text(size=14))
+p3=ggplot(data=filter(long,fips==select_fips[3]))+geom_line(aes(x=date,y=case,group=attr,color=attr))+ggtitle(select_fips[3])+theme(axis.title.x=element_text(size=14),axis.title.y=element_text(size=14))
+p4=ggplot(data=filter(long,fips==select_fips[4]))+geom_line(aes(x=date,y=case,group=attr,color=attr))+ggtitle(select_fips[4])+theme(axis.title.x=element_text(size=14),axis.title.y=element_text(size=14))
+p5=ggplot(data=filter(long,fips==select_fips[5]))+geom_line(aes(x=date,y=case,group=attr,color=attr))+ggtitle(select_fips[5])+theme(axis.title.x=element_text(size=14),axis.title.y=element_text(size=14))
+p6=ggplot(data=filter(long,fips==select_fips[6]))+geom_line(aes(x=date,y=case,group=attr,color=attr))+ggtitle(select_fips[6])+theme(axis.title.x=element_text(size=14),axis.title.y=element_text(size=14))
+multiplot(p1,p2,p3,p4,p5,p6,cols=2)
+```
+
 
 ### Shiny app
 Code of our shiny app is included in "app.r" file. Our shiny app included four sections, "US COVID-19 Dashboard", "GLM", "Instantaneous Rt", and "RNN", as shown in following figure. "GLM", "Instantaneous Rt", and "RNN", visualize the three other kinds of our analysis, respectively.
