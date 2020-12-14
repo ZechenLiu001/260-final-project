@@ -11,7 +11,7 @@ In our project, we use four different methods to analyze and predict COVID-19 in
 4. A Shiny app spatial data to detect potential hotspots of counties and aid finding the counties impacted heavily by COVID-19, and serveas an efficient tool to visualize the data anaylsises.
 
 Instruction:
-1. Look at Rmd and html filt `Final report.Rmd`, `Final-report.html`
+1. Look at Rmd and html filt `Final-report.Rmd`, `Final-report.html`
 2. Run our Shiny app `app.R`
 
 Data Files:
@@ -20,7 +20,9 @@ Data Files:
 3. `processed.csv`
 4. `rnn_results.csv`
 5. `time_series_covid19_confirmed_US.csv`
-5. `us-counties.csv`
+6. `us-counties.csv`
+7. `result.csv`
+8. `rnn.h5`
 
 
 Pictures:
